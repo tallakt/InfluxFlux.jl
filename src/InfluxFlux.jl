@@ -7,7 +7,8 @@ using DataFrames
 using TimeZones
 
 export time_spec_to_epoc_ns, influx_server, flux, flux_to_dataframe,
-       measurement, aggregate_measurement, measurements, buckets
+       measurement, aggregate_measurement, measurements, buckets,
+       list_buckets, list_measurements, list_fields
 
 
 TimeSpec = Union{Int,DateTime,ZonedDateTime}
@@ -107,6 +108,34 @@ end
 
 function buckets(srv::InfluxServer)
     String.(InfluxFlux.flux_to_dataframe(srv, "buckets()")[:, :name])
+end
+
+
+function list_buckets(srv::InfluxServer)
+    buckets(srv)
+end
+
+
+function list_measurements(srv::InfluxServer, bucket::String)
+    measurements(srv, bucket)
+end
+
+
+function list_fields(srv::InfluxServer, bucket::String)
+    q = """
+    import "influxdata/influxdb/schema"
+    schema.fieldKeys(bucket: "$bucket")
+    """
+    String.(InfluxFlux.flux_to_dataframe(srv, q)[:, "_value"])
+end
+
+
+function list_fields(srv::InfluxServer, bucket::String, measurement::String)
+    q = """
+    import "influxdata/influxdb/schema"
+    schema.measurementFieldKeys(bucket: "$bucket", measurement: "$measurement")
+    """
+    String.(InfluxFlux.flux_to_dataframe(srv, q)[:, "_value"])
 end
 
 end # module

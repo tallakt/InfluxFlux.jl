@@ -12,7 +12,6 @@ Only supports read access
 
 ## Usage
 
-
 ```Julia
 using Dates
 using InfluxFlux
@@ -37,5 +36,10 @@ dataframe1 = measurement(srv, "example_bucket", "sensors", now(UTC) - Hour(1), n
 
 # get measurements with a reduced sample rate 1 minute
 dataframe2 = aggregate_measurement(srv, "example_bucket", "sensors", now(UTC) - Hour(1), now(), Minute(1))
-```
 
+# discovery helpers for interactive exploration
+buckets = list_buckets(srv)
+measurements = list_measurements(srv, "example_bucket")
+fields = list_fields(srv, "example_bucket")
+fields = list_fields(srv, "example_bucket", "sensors")  # scoped to one measurement
+```
