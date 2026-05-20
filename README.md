@@ -75,19 +75,6 @@ tables = aggregate_measurement_multi(srv, "example_bucket", "sensors", now(UTC) 
 df = aggregate_measurement(srv, "example_bucket", "sensors", now(UTC) - Day(1), now(), Hour(1); fn="max")
 ```
 
-### Multiple named results
-
-`flux_to_dataframe_multi()` handles queries that yield multiple named result sets. Add `|> yield(name: "foo")` to your query for a meaningful key; without it the key defaults to `:_result`. Each key holds a `Vector{DataFrame}`.
-
-```Julia
-tables = flux_to_dataframe_multi(srv, """
-  from(bucket: "example-bucket")
-    |> range(start: -1h)
-    |> yield(name: "example")
-  """)
-tables.example
-```
-
 ### Raw queries
 
 `flux()` returns the raw response body. `flux_to_dataframe()` parses it into a
@@ -103,6 +90,17 @@ table = flux_to_dataframe(srv, """
     |> group(columns: ["sensorID"])
     |> mean()
   """)
+```
+
+`flux_to_dataframe_multi()` handles queries that yield multiple named result sets. Add `|> yield(name: "foo")` to your query for a meaningful key; without it the key defaults to `:_result`. Each key holds a `Vector{DataFrame}`.
+
+```Julia
+tables = flux_to_dataframe_multi(srv, """
+  from(bucket: "example-bucket")
+    |> range(start: -1h)
+    |> yield(name: "example")
+  """)
+tables.example
 ```
 
 ## Tips for Writing Flux
