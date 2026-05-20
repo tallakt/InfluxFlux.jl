@@ -1,6 +1,7 @@
 module InfluxFlux
 
 using HTTP
+using JSON
 using CSV
 using Dates
 using DataFrames
@@ -29,6 +30,19 @@ struct InfluxServer
     uri::String
     org::String
     api_token::String
+end
+
+struct InfluxFluxError <: Exception
+    status::Int
+    code::Union{String,Nothing}
+    message::String
+    raw::String
+end
+
+Base.showerror(io::IO, e::InfluxFluxError) = begin
+    println(io, "InfluxFluxError (HTTP $(e.status))")
+    println(io, "Code: ", something(e.code, "unknown"))
+    println(io, e.message)
 end
 
 
@@ -64,14 +78,35 @@ end
 
 function flux(srv::InfluxServer, flux_query::String)
     headers = merge(token_json_headers(srv), Dict("Content-Type" => "application/vnd.flux"))
-    response = HTTP.post(uri_helper(srv, "api/v2/query"), headers, flux_query);
+
+    response = HTTP.post(uri_helper(srv, "api/v2/query"), headers, flux_query)
+
     if response.status == 200
-        response.body
+        return response.body
+    end
+
+    body_str = String(copy(response.body))
+
+    # Try to parse JSON error
+    err = try
+        JSON.parse(body_str)
+    catch
+        nothing
+    end
+
+    if err !== nothing
+        throw(
+            InfluxFluxError(
+                response.status,
+                get(err, "code", nothing),
+                get(err, "message", body_str),
+                body_str,
+            ),
+        )
     else
-        throw(response.status)
+        throw(InfluxFluxError(response.status, nothing, body_str, body_str))
     end
 end
-
 
 function parse_annotated_csv(body::Vector{UInt8})
     chunks = split(String(copy(body)), r"\r?\n\r?\n")
