@@ -6,9 +6,20 @@ using Dates
 using DataFrames
 using TimeZones
 
-export time_spec_to_epoc_ns, influx_server, flux, flux_to_dataframe,
-       measurement, aggregate_measurement, measurements, buckets,
-       list_buckets, list_measurements, list_fields
+export time_spec_to_epoc_ns,
+    influx_server,
+    flux,
+    flux_to_dataframe,
+    flux_to_dataframe_multi,
+    measurement,
+    measurement_multi,
+    aggregate_measurement,
+    aggregate_measurement_multi,
+    measurements,
+    buckets,
+    list_buckets,
+    list_measurements,
+    list_fields
 
 
 TimeSpec = Union{Int,DateTime,ZonedDateTime}
@@ -42,8 +53,7 @@ end
 
 
 function token_json_headers(srv::InfluxServer)
-    Dict("Authorization" => "Token $(srv.api_token)"
-         , "Accept" => "application/json")
+    Dict("Authorization" => "Token $(srv.api_token)", "Accept" => "application/json")
 end
 
 
@@ -63,26 +73,105 @@ function flux(srv::InfluxServer, flux_query::String)
 end
 
 
-function flux_to_dataframe(srv::InfluxServer, flux_query::String)
-    CSV.File(flux(srv, flux_query), delim = ',') |> DataFrame
+function parse_annotated_csv(body::Vector{UInt8})
+    chunks = split(String(copy(body)), r"\r?\n\r?\n")
+    result = Pair{Symbol,DataFrame}[]
+    for chunk in chunks
+        lines = split(chunk, r"\r?\n")
+        default_line = findfirst(l -> startswith(l, "#default,"), lines)
+        default_name = if !isnothing(default_line)
+            raw = split(lines[default_line], ",")[2]
+            isempty(raw) ? "_result" : raw
+        else
+            "_result"
+        end
+        data_lines = filter(!isempty, filter(l -> !startswith(l, "#"), lines))
+        isempty(data_lines) && continue
+        # second field of first data row is the result name when explicitly yielded
+        name = if length(data_lines) >= 2
+            raw = split(data_lines[2], ",")[2]
+            isempty(raw) ? default_name : raw
+        else
+            default_name
+        end
+        push!(
+            result,
+            Symbol(name) =>
+                (CSV.File(IOBuffer(join(data_lines, "\n")), delim = ',') |> DataFrame),
+        )
+    end
+    result
 end
 
 
-function measurement(srv::InfluxServer, bucket::String, measurement_name::String, from::TimeSpec, to::TimeSpec)
+function flux_to_dataframe_multi(srv::InfluxServer, flux_query::String)
+    pairs_list = parse_annotated_csv(flux(srv, flux_query))
+
+    groups = Dict{Symbol,Vector{DataFrame}}()
+    order = Symbol[]
+
+    for (name, df) in pairs_list
+        if !haskey(groups, name)
+            groups[name] = DataFrame[]
+            push!(order, name)
+        end
+        push!(groups[name], df)
+    end
+
+    NamedTuple(name => get(groups, name, DataFrame[]) for name in order)
+end
+
+function flux_to_dataframe(srv::InfluxServer, flux_query::String)
+    only(last.(parse_annotated_csv(flux(srv, flux_query))))
+end
+
+function clean_influx_df(df::DataFrame)
+    dropcols = Set(["result", "table", "_start", "_stop", "_measurement", "Column1"])
+    keep = filter(c -> !(String(c) in dropcols), names(df))
+    return df[:, keep]
+end
+
+function measurement_multi(
+    srv::InfluxServer,
+    bucket::String,
+    measurement_name::String,
+    from::TimeSpec,
+    to::TimeSpec,
+)
     q = """
     from(bucket: "$bucket")
     |> range(start: time(v: uint(v: $(time_spec_to_epoc_ns(from)))), stop: time(v: uint(v: $(time_spec_to_epoc_ns(to)))))
     |> filter(fn: (r) => r._measurement == "$measurement_name")
     |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
     |> map(fn: (r) => ({ r with _time: uint(v: r._time) }))
+    |> drop(columns: ["result", "table", "_start", "_stop", "_measurement"])
+    |> yield(name: "out")
     """
-    #println(q)
-    result = flux_to_dataframe(srv, q)
-    result[:,7:end] # remove influxdb internal columns
+    result = flux_to_dataframe_multi(srv, q).out
+    [clean_influx_df(df) for df in result] # remove influxdb internal columns
 end
 
 
-function aggregate_measurement(srv::InfluxServer, bucket::String, measurement_name::String, from::TimeSpec, to::TimeSpec, window::Period; fn::String = "mean")
+function measurement(
+    srv::InfluxServer,
+    bucket::String,
+    measurement_name::String,
+    from::TimeSpec,
+    to::TimeSpec,
+)
+    only(measurement_multi(srv, bucket, measurement_name, from, to))
+end
+
+
+function aggregate_measurement_multi(
+    srv::InfluxServer,
+    bucket::String,
+    measurement_name::String,
+    from::TimeSpec,
+    to::TimeSpec,
+    window::Period;
+    fn::String = "mean",
+)
     q = """
     from(bucket: "$bucket")
     |> range(start: time(v: uint(v: $(time_spec_to_epoc_ns(from)))), stop: time(v: uint(v: $(time_spec_to_epoc_ns(to)))))
@@ -90,11 +179,35 @@ function aggregate_measurement(srv::InfluxServer, bucket::String, measurement_na
     |> aggregateWindow(every: $(Nanosecond(window).value)ns, fn: $fn, createEmpty: false)
     |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
     |> map(fn: (r) => ({ r with _time: uint(v: r._time) }))
+    |> drop(columns: ["result", "table", "_start", "_stop", "_measurement"])
+    |> yield(name: "out")
     """
-    #println(q)
-    result = flux_to_dataframe(srv, q)
-    result[:,7:end] # remove influxdb internal columns
+    result = flux_to_dataframe_multi(srv, q).out
+    [clean_influx_df(df) for df in result] # remove influxdb internal columns
 end
+
+function aggregate_measurement(
+    srv::InfluxServer,
+    bucket::String,
+    measurement_name::String,
+    from::TimeSpec,
+    to::TimeSpec,
+    window::Period;
+    fn::String = "mean",
+)
+    only(
+        aggregate_measurement_multi(
+            srv,
+            bucket,
+            measurement_name,
+            from,
+            to,
+            window;
+            fn = fn,
+        ),
+    )
+end
+
 
 
 function measurements(srv::InfluxServer, bucket::String)
@@ -102,12 +215,12 @@ function measurements(srv::InfluxServer, bucket::String)
     import "influxdata/influxdb/schema"
     schema.measurements(bucket: "$bucket")
     """
-    String.(InfluxFlux.flux_to_dataframe(srv, q)[:, "_value"])
+    String.(flux_to_dataframe(srv, q)[:, "_value"])
 end
 
 
 function buckets(srv::InfluxServer)
-    String.(InfluxFlux.flux_to_dataframe(srv, "buckets()")[:, :name])
+    String.(flux_to_dataframe(srv, "buckets()")[:, :name])
 end
 
 

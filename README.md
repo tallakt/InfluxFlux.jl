@@ -22,7 +22,7 @@ srv = influx_server("https://some.influxdb.endpoint.influxdata.com", "some@organ
 # raw query to string
 raw = flux(srv, "buckets()") |> String
 
-# raw query to dataframe, note only one table supported
+# raw query to dataframe — errors if query returns more than one table
 table = flux_to_dataframe(srv, """
   from(bucket: "example-bucket")
     |> range(start: -1d)
@@ -36,6 +36,15 @@ dataframe1 = measurement(srv, "example_bucket", "sensors", now(UTC) - Hour(1), n
 
 # get measurements with a reduced sample rate 1 minute
 dataframe2 = aggregate_measurement(srv, "example_bucket", "sensors", now(UTC) - Hour(1), now(), Minute(1))
+
+# raw query returning multiple tables, keyed by yield name
+# add |> yield(name: "foo") to your query for a meaningful key, otherwise defaults to :_result
+tables = flux_to_dataframes(srv, """
+  from(bucket: "example-bucket")
+    |> range(start: -1h)
+    |> yield(name: "example")
+  """)
+tables.example
 
 # discovery helpers for interactive exploration
 buckets = list_buckets(srv)
