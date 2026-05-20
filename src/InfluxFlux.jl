@@ -16,14 +16,13 @@ export time_spec_to_epoc_ns,
     measurement_multi,
     aggregate_measurement,
     aggregate_measurement_multi,
-    measurements,
-    buckets,
     list_buckets,
     list_measurements,
-    list_fields
+    list_fields,
+    clean_influx_df
 
 
-TimeSpec = Union{Int,DateTime,ZonedDateTime}
+const TimeSpec = Union{Int,DateTime,ZonedDateTime}
 
 
 struct InfluxServer
@@ -79,7 +78,7 @@ end
 function flux(srv::InfluxServer, flux_query::String)
     headers = merge(token_json_headers(srv), Dict("Content-Type" => "application/vnd.flux"))
 
-    response = HTTP.post(uri_helper(srv, "api/v2/query"), headers, flux_query)
+    response = HTTP.post(uri_helper(srv, "api/v2/query"), headers, flux_query; status_exception = false)
 
     if response.status == 200
         return response.body
@@ -183,7 +182,7 @@ function measurement_multi(
     |> yield(name: "out")
     """
     result = flux_to_dataframe_multi(srv, q).out
-    [clean_influx_df(df) for df in result] # remove influxdb internal columns
+    [clean_influx_df(df) for df in result]
 end
 
 
@@ -218,7 +217,7 @@ function aggregate_measurement_multi(
     |> yield(name: "out")
     """
     result = flux_to_dataframe_multi(srv, q).out
-    [clean_influx_df(df) for df in result] # remove influxdb internal columns
+    [clean_influx_df(df) for df in result]
 end
 
 function aggregate_measurement(
@@ -245,7 +244,12 @@ end
 
 
 
-function measurements(srv::InfluxServer, bucket::String)
+function list_buckets(srv::InfluxServer)
+    String.(flux_to_dataframe(srv, "buckets()")[:, :name])
+end
+
+
+function list_measurements(srv::InfluxServer, bucket::String)
     q = """
     import "influxdata/influxdb/schema"
     schema.measurements(bucket: "$bucket")
@@ -254,19 +258,8 @@ function measurements(srv::InfluxServer, bucket::String)
 end
 
 
-function buckets(srv::InfluxServer)
-    String.(flux_to_dataframe(srv, "buckets()")[:, :name])
-end
-
-
-function list_buckets(srv::InfluxServer)
-    buckets(srv)
-end
-
-
-function list_measurements(srv::InfluxServer, bucket::String)
-    measurements(srv, bucket)
-end
+@deprecate buckets(srv::InfluxServer) list_buckets(srv)
+@deprecate measurements(srv::InfluxServer, bucket::String) list_measurements(srv, bucket)
 
 
 function list_fields(srv::InfluxServer, bucket::String)
@@ -274,7 +267,7 @@ function list_fields(srv::InfluxServer, bucket::String)
     import "influxdata/influxdb/schema"
     schema.fieldKeys(bucket: "$bucket")
     """
-    String.(InfluxFlux.flux_to_dataframe(srv, q)[:, "_value"])
+    String.(flux_to_dataframe(srv, q)[:, "_value"])
 end
 
 
@@ -283,7 +276,7 @@ function list_fields(srv::InfluxServer, bucket::String, measurement::String)
     import "influxdata/influxdb/schema"
     schema.measurementFieldKeys(bucket: "$bucket", measurement: "$measurement")
     """
-    String.(InfluxFlux.flux_to_dataframe(srv, q)[:, "_value"])
+    String.(flux_to_dataframe(srv, q)[:, "_value"])
 end
 
 end # module

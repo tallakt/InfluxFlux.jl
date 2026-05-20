@@ -2,7 +2,7 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "a4a733fba4bd683bc3210028307bbfc02bea07df"
+project_hash = "12b9a2d970e1b487298844b52bfebe7900c68957"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -132,7 +132,7 @@ version = "1.11.0"
 deps = ["CSV", "DataFrames", "Dates", "HTTP", "JSON", "TimeZones"]
 path = "."
 uuid = "6c305548-b09e-472b-8440-afccb1cb4f6f"
-version = "0.1.0"
+version = "1.0.0"
 
 [[deps.InlineStrings]]
 git-tree-sha1 = "8f3d257792a522b4601c24a577954b0a8cd7334d"
