@@ -129,7 +129,7 @@ uuid = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 version = "1.11.0"
 
 [[deps.InfluxFlux]]
-deps = ["CSV", "DataFrames", "Dates", "HTTP", "TimeZones"]
+deps = ["CSV", "DataFrames", "Dates", "HTTP", "JSON", "TimeZones"]
 path = "."
 uuid = "6c305548-b09e-472b-8440-afccb1cb4f6f"
 version = "0.1.0"
