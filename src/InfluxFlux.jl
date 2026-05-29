@@ -21,9 +21,7 @@ export time_spec_to_epoc_ns,
     list_fields,
     clean_influx_df
 
-
 const TimeSpec = Union{Int,DateTime,ZonedDateTime}
-
 
 struct InfluxServer
     uri::String
@@ -38,47 +36,42 @@ struct InfluxFluxError <: Exception
     raw::String
 end
 
-Base.showerror(io::IO, e::InfluxFluxError) = begin
+function Base.showerror(io::IO, e::InfluxFluxError)
     println(io, "InfluxFluxError (HTTP $(e.status))")
     println(io, "Code: ", something(e.code, "unknown"))
     println(io, e.message)
 end
 
-
 function time_spec_to_epoc_ns(time_spec::Int)
     time_spec
 end
-
 
 function time_spec_to_epoc_ns(time_spec::ZonedDateTime)
     time_spec_to_epoc_ns(DateTime(time_spec, UTC))
 end
 
-
 function time_spec_to_epoc_ns(time_spec::DateTime)
     Int(1_000_000_000 * datetime2unix(time_spec))
 end
 
-
 function uri_helper(srv::InfluxServer, path::String)
-    HTTP.URI(HTTP.URI("$(srv.uri)/$path"), query = Dict("org" => srv.org))
+    HTTP.URI(HTTP.URI("$(srv.uri)/$path"); query=Dict("org" => srv.org))
 end
-
 
 function token_json_headers(srv::InfluxServer)
     Dict("Authorization" => "Token $(srv.api_token)", "Accept" => "application/json")
 end
 
-
 function influx_server(uri::String, org::String, api_token::String)::InfluxServer
     InfluxServer(uri, org, api_token)
 end
 
-
 function flux(srv::InfluxServer, flux_query::String)
     headers = merge(token_json_headers(srv), Dict("Content-Type" => "application/vnd.flux"))
 
-    response = HTTP.post(uri_helper(srv, "api/v2/query"), headers, flux_query; status_exception = false)
+    response = HTTP.post(
+        uri_helper(srv, "api/v2/query"), headers, flux_query; status_exception=false
+    )
 
     if response.status == 200
         return response.body
@@ -131,12 +124,11 @@ function parse_annotated_csv(body::Vector{UInt8})
         push!(
             result,
             Symbol(name) =>
-                (CSV.File(IOBuffer(join(data_lines, "\n")), delim = ',') |> DataFrame),
+                (DataFrame(CSV.File(IOBuffer(join(data_lines, "\n")); delim=','))),
         )
     end
     result
 end
-
 
 function flux_to_dataframe_multi(srv::InfluxServer, flux_query::String)
     pairs_list = parse_annotated_csv(flux(srv, flux_query))
@@ -185,7 +177,6 @@ function measurement_multi(
     [clean_influx_df(df) for df in result]
 end
 
-
 function measurement(
     srv::InfluxServer,
     bucket::String,
@@ -196,7 +187,6 @@ function measurement(
     only(measurement_multi(srv, bucket, measurement_name, from, to))
 end
 
-
 function aggregate_measurement_multi(
     srv::InfluxServer,
     bucket::String,
@@ -204,7 +194,7 @@ function aggregate_measurement_multi(
     from::TimeSpec,
     to::TimeSpec,
     window::Period;
-    fn::String = "mean",
+    fn::String="mean",
 )
     q = """
     from(bucket: "$bucket")
@@ -227,27 +217,16 @@ function aggregate_measurement(
     from::TimeSpec,
     to::TimeSpec,
     window::Period;
-    fn::String = "mean",
+    fn::String="mean",
 )
     only(
-        aggregate_measurement_multi(
-            srv,
-            bucket,
-            measurement_name,
-            from,
-            to,
-            window;
-            fn = fn,
-        ),
+        aggregate_measurement_multi(srv, bucket, measurement_name, from, to, window; fn=fn)
     )
 end
-
-
 
 function list_buckets(srv::InfluxServer)
     String.(flux_to_dataframe(srv, "buckets()")[:, :name])
 end
-
 
 function list_measurements(srv::InfluxServer, bucket::String)
     q = """
@@ -257,10 +236,8 @@ function list_measurements(srv::InfluxServer, bucket::String)
     String.(flux_to_dataframe(srv, q)[:, "_value"])
 end
 
-
 @deprecate buckets(srv::InfluxServer) list_buckets(srv)
 @deprecate measurements(srv::InfluxServer, bucket::String) list_measurements(srv, bucket)
-
 
 function list_fields(srv::InfluxServer, bucket::String)
     q = """
@@ -269,7 +246,6 @@ function list_fields(srv::InfluxServer, bucket::String)
     """
     String.(flux_to_dataframe(srv, q)[:, "_value"])
 end
-
 
 function list_fields(srv::InfluxServer, bucket::String, measurement::String)
     q = """
