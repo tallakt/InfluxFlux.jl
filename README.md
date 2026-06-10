@@ -1,7 +1,6 @@
 # InfluxFlux
 
-A simple Julia client to access InfluxDB based on the Flux query language.
-
+InfluxFlux.jl is a simple Julia package for querying InfluxDB, returning results as DataFrames using the functions or custom queries using the Flux query language.
 Only supports read access
 
 ## Install
