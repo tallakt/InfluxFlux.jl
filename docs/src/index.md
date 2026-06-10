@@ -5,8 +5,7 @@ A minimal Julia package for **read-only** access to an [InfluxDB v2](https://doc
 ## Installation
 
 ```julia
-using Pkg
-Pkg.add("InfluxFlux")
+] add InfluxFlux
 ```
 
 ## Quick start
