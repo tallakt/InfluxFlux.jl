@@ -5,6 +5,8 @@ Only supports read access
 
 [![version](https://juliahub.com/docs/General/InfluxFlux/stable/version.svg)](https://juliahub.com/ui/Packages/General/InfluxFlux/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://tallakt.github.io/InfluxFlux.jl/stable)
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://tallakt.github.io/InfluxFlux.jl/dev)
 
 
 ## Install

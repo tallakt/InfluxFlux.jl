@@ -42,6 +42,14 @@ function Base.showerror(io::IO, e::InfluxFluxError)
     println(io, e.message)
 end
 
+"""
+    time_spec_to_epoc_ns(time_spec::TimeSpec) -> Int
+
+Convert a `TimeSpec` value to an integer epoch-nanosecond timestamp (Unix × 10⁹).
+
+Accepts an `Int` (returned as-is), a `DateTime` (treated as UTC), or a
+`ZonedDateTime` (converted to UTC first).
+"""
 function time_spec_to_epoc_ns(time_spec::Int)
     time_spec
 end
@@ -62,10 +70,27 @@ function token_json_headers(srv::InfluxServer)
     Dict("Authorization" => "Token $(srv.api_token)", "Accept" => "application/json")
 end
 
+"""
+    influx_server(uri, org, api_token) -> InfluxServer
+
+Create a handle to an InfluxDB v2 server.
+
+# Arguments
+- `uri`: Base URL of the server, e.g. `"http://localhost:8086"`.
+- `org`: InfluxDB organisation name.
+- `api_token`: Read-access API token.
+"""
 function influx_server(uri::String, org::String, api_token::String)::InfluxServer
     InfluxServer(uri, org, api_token)
 end
 
+"""
+    flux(srv, flux_query) -> Vector{UInt8}
+
+Execute a raw Flux query against `srv` and return the response body as bytes.
+
+Throws an `InfluxFluxError` on any non-200 HTTP response.
+"""
 function flux(srv::InfluxServer, flux_query::String)
     headers = merge(token_json_headers(srv), Dict("Content-Type" => "application/vnd.flux"))
 
@@ -130,6 +155,31 @@ function parse_annotated_csv(body::Vector{UInt8})
     result
 end
 
+"""
+    flux_to_dataframe_multi(srv, flux_query) -> NamedTuple
+
+Execute a Flux query and return a `NamedTuple` mapping each named result to a
+`Vector{DataFrame}` (one element per table group).
+
+Use this when a query yields multiple results with `yield(name: ...)`:
+
+```julia
+q = \"\"\"
+    from(bucket: "sensors")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r._measurement == "temperature")
+      |> yield(name: "temp")
+
+    from(bucket: "sensors")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r._measurement == "humidity")
+      |> yield(name: "hum")
+\"\"\"
+result = flux_to_dataframe_multi(srv, q)
+result.temp   # Vector{DataFrame} for temperature tables
+result.hum    # Vector{DataFrame} for humidity tables
+```
+"""
 function flux_to_dataframe_multi(srv::InfluxServer, flux_query::String)
     pairs_list = parse_annotated_csv(flux(srv, flux_query))
 
@@ -147,16 +197,62 @@ function flux_to_dataframe_multi(srv::InfluxServer, flux_query::String)
     NamedTuple(name => get(groups, name, DataFrame[]) for name in order)
 end
 
+"""
+    flux_to_dataframe(srv, flux_query) -> DataFrame
+
+Execute a Flux query and return the result as a single `DataFrame`.
+
+```julia
+df = flux_to_dataframe(srv, \"\"\"
+    from(bucket: "sensors")
+      |> range(start: -1h)
+      |> filter(fn: (r) => r._measurement == "cpu_load")
+\"\"\")
+# df has columns: result, table, _start, _stop, _time, _value, _field, _measurement, host, …
+```
+
+Throws if the query returns more than one result table. Use
+[`flux_to_dataframe_multi`](@ref) when multiple results are expected.
+"""
 function flux_to_dataframe(srv::InfluxServer, flux_query::String)
     only(last.(parse_annotated_csv(flux(srv, flux_query))))
 end
 
+"""
+    clean_influx_df(df) -> DataFrame
+
+Drop the InfluxDB bookkeeping columns (`result`, `table`, `_start`, `_stop`,
+`_measurement`, `Column1`) from a DataFrame, leaving only the time and field
+columns.
+
+```julia
+raw = flux_to_dataframe(srv, "from(bucket: \\"env\\") |> range(start: -1h) |> pivot(...)")
+# raw has columns: result, table, _start, _stop, _measurement, _time, temp, humidity
+df = clean_influx_df(raw)
+# df has columns: _time, temp, humidity
+```
+"""
 function clean_influx_df(df::DataFrame)
     dropcols = Set(["result", "table", "_start", "_stop", "_measurement", "Column1"])
     keep = filter(c -> !(String(c) in dropcols), names(df))
     return df[:, keep]
 end
 
+"""
+    measurement_multi(srv, bucket, measurement_name, from, to) -> Vector{DataFrame}
+
+Fetch a measurement over a time range and return one `DataFrame` per table
+group (typically one per tag-set combination). Each `DataFrame` has one column
+per field plus a `_time` column of epoch-nanosecond integers.
+
+```julia
+dfs = measurement_multi(srv, "sensors", "temperature", now() - Minute(10), now())
+# dfs[1] — columns: _time, value  (tag set A)
+# dfs[2] — columns: _time, value  (tag set B)
+```
+
+See also [`measurement`](@ref) when only one table group is expected.
+"""
 function measurement_multi(
     srv::InfluxServer,
     bucket::String,
@@ -177,6 +273,20 @@ function measurement_multi(
     [clean_influx_df(df) for df in result]
 end
 
+"""
+    measurement(srv, bucket, measurement_name, from, to) -> DataFrame
+
+Fetch a measurement over a time range and return it as a single `DataFrame`
+with one column per field and a `_time` column of epoch-nanosecond integers.
+
+```julia
+df = measurement(srv, "sensors", "temperature", now() - Hour(1), now())
+# df columns: _time, indoor, outdoor
+```
+
+Throws if the query returns more than one table group (i.e. multiple tag-set
+combinations). Use [`measurement_multi`](@ref) in that case.
+"""
 function measurement(
     srv::InfluxServer,
     bucket::String,
@@ -187,6 +297,30 @@ function measurement(
     only(measurement_multi(srv, bucket, measurement_name, from, to))
 end
 
+"""
+    aggregate_measurement_multi(srv, bucket, measurement_name, from, to, window; fn="mean")
+    -> Vector{DataFrame}
+
+Like [`measurement_multi`](@ref) but downsamples each field with an aggregate
+function applied over `window`-sized time buckets. Returns one `DataFrame` per
+tag-set combination.
+
+```julia
+# 5-minute means over the last hour
+dfs = aggregate_measurement_multi(srv, "sensors", "temperature",
+                                  now() - Hour(1), now(), Minute(5))
+
+# Maximum instead of mean
+dfs = aggregate_measurement_multi(srv, "sensors", "temperature",
+                                  now() - Hour(1), now(), Minute(5); fn="max")
+```
+
+`window` can be any `Period`, e.g. `Second(30)`, `Minute(5)`, `Hour(1)`.
+
+Common values for `fn`: `"mean"`, `"median"`, `"sum"`, `"count"`, `"min"`, `"max"`.
+See the [Flux aggregateWindow docs](https://docs.influxdata.com/flux/v0/stdlib/universe/aggregatewindow/)
+for the full list.
+"""
 function aggregate_measurement_multi(
     srv::InfluxServer,
     bucket::String,
@@ -210,6 +344,27 @@ function aggregate_measurement_multi(
     [clean_influx_df(df) for df in result]
 end
 
+"""
+    aggregate_measurement(srv, bucket, measurement_name, from, to, window; fn="mean")
+    -> DataFrame
+
+Downsample a measurement into fixed-width time buckets and return a single
+`DataFrame`. See [`aggregate_measurement_multi`](@ref) for supported `fn` values.
+
+```julia
+# Hourly means over the past day
+df = aggregate_measurement(srv, "sensors", "temperature",
+                           now() - Day(1), now(), Hour(1))
+# df columns: _time, indoor, outdoor
+
+# 10-minute maxima
+df = aggregate_measurement(srv, "power", "consumption",
+                           now() - Hour(6), now(), Minute(10); fn="max")
+```
+
+Throws if the query returns more than one table group. Use
+[`aggregate_measurement_multi`](@ref) in that case.
+"""
 function aggregate_measurement(
     srv::InfluxServer,
     bucket::String,
@@ -224,10 +379,30 @@ function aggregate_measurement(
     )
 end
 
+"""
+    list_buckets(srv) -> Vector{String}
+
+Return the names of all buckets visible to the configured API token.
+
+```julia
+list_buckets(srv)
+# ["_monitoring", "_tasks", "sensors", "power"]
+```
+"""
 function list_buckets(srv::InfluxServer)
     String.(flux_to_dataframe(srv, "buckets()")[:, :name])
 end
 
+"""
+    list_measurements(srv, bucket) -> Vector{String}
+
+Return the measurement names stored in `bucket`.
+
+```julia
+list_measurements(srv, "sensors")
+# ["humidity", "pressure", "temperature"]
+```
+"""
 function list_measurements(srv::InfluxServer, bucket::String)
     q = """
     import "influxdata/influxdb/schema"
@@ -239,6 +414,20 @@ end
 @deprecate buckets(srv::InfluxServer) list_buckets(srv)
 @deprecate measurements(srv::InfluxServer, bucket::String) list_measurements(srv, bucket)
 
+"""
+    list_fields(srv, bucket) -> Vector{String}
+    list_fields(srv, bucket, measurement) -> Vector{String}
+
+Return field key names in `bucket`, optionally filtered to a single `measurement`.
+
+```julia
+list_fields(srv, "sensors")
+# ["humidity", "pressure", "temperature"]
+
+list_fields(srv, "sensors", "temperature")
+# ["indoor", "outdoor"]
+```
+"""
 function list_fields(srv::InfluxServer, bucket::String)
     q = """
     import "influxdata/influxdb/schema"
