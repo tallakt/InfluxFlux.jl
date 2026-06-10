@@ -3,6 +3,10 @@
 InfluxFlux.jl is a simple Julia package for querying InfluxDB, returning results as DataFrames using the functions or custom queries using the Flux query language.
 Only supports read access
 
+[![version](https://juliahub.com/docs/General/InfluxFlux/stable/version.svg)](https://juliahub.com/ui/Packages/General/InfluxFlux/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+
 ## Install
 
 ```Julia
