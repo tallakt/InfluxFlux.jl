@@ -7,7 +7,7 @@ Only supports read access
 ## Install
 
 ```Julia
-] add https://github.com/tallakt/InfluxFlux#main
+] add InfluxFlux
 ```
 
 ## Usage
