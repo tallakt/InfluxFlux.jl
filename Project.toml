@@ -1,7 +1,7 @@
 name = "InfluxFlux"
 uuid = "6c305548-b09e-472b-8440-afccb1cb4f6f"
-version = "1.0.2"
-authors = ["Tallak Tveide <tt@kitemill.no>"]
+version = "1.0.3"
+authors = ["Tallak Tveide <tallak@tveide.net>"]
 
 [deps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
